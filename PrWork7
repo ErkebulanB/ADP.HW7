@@ -1,1 +1,385 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Protocol, Optional, List, Dict, Tuple
+from abc import ABC, abstractmethod
+
+class ICommand(Protocol):
+    def execute(self): ...
+    def undo(self): ...
+
+@dataclass
+class Light:
+    name: str
+    is_on: bool = False
+    def on(self): self.is_on = True; print(f"{self.name}: жарық қосылды")
+    def off(self): self.is_on = False; print(f"{self.name}: жарық сөндірілді")
+
+@dataclass
+class Television:
+    name: str
+    is_on: bool = False
+    def on(self): self.is_on = True; print(f"{self.name}: теледидар қосылды")
+    def off(self): self.is_on = False; print(f"{self.name}: теледидар сөндірілді")
+
+@dataclass
+class AirConditioner:
+    name: str
+    is_on: bool = False
+    mode: str = "қалыпты"
+    def on(self): self.is_on = True; print(f"{self.name}: кондиционер қосылды ({self.mode})")
+    def off(self): self.is_on = False; print(f"{self.name}: кондиционер сөндірілді")
+    def set_mode(self, m: str): self.mode = m; print(f"{self.name}: режим {self.mode}")
+
+@dataclass
+class Curtains:
+    name: str
+    open_state: bool = False
+    def open(self): self.open_state = True; print(f"{self.name}: перде ашылды")
+    def close(self): self.open_state = False; print(f"{self.name}: перде жабылды")
+
+@dataclass
+class MusicPlayer:
+    name: str
+    playing: bool = False
+    def play(self): self.playing = True; print(f"{self.name}: музыка ойнатылды")
+    def stop(self): self.playing = False; print(f"{self.name}: музыка тоқтатылды")
+
+class NoCommand:
+    def execute(self): print("Бұл батырма бос")
+    def undo(self): print("Болдырмау мүмкін емес")
+
+@dataclass
+class LightOn:
+    light: Light
+    def execute(self): self.light.on()
+    def undo(self): self.light.off()
+
+@dataclass
+class LightOff:
+    light: Light
+    def execute(self): self.light.off()
+    def undo(self): self.light.on()
+
+@dataclass
+class TVOn:
+    tv: Television
+    def execute(self): self.tv.on()
+    def undo(self): self.tv.off()
+
+@dataclass
+class TVOff:
+    tv: Television
+    def execute(self): self.tv.off()
+    def undo(self): self.tv.on()
+
+@dataclass
+class ACOn:
+    ac: AirConditioner
+    def execute(self): self.ac.on()
+    def undo(self): self.ac.off()
+
+@dataclass
+class ACOff:
+    ac: AirConditioner
+    def execute(self): self.ac.off()
+    def undo(self): self.ac.on()
+
+@dataclass
+class ACMode:
+    ac: AirConditioner
+    mode: str
+    prev: Optional[str] = None
+    def execute(self): self.prev = self.ac.mode; self.ac.set_mode(self.mode)
+    def undo(self): self.ac.set_mode(self.prev) if self.prev is not None else print("Алдыңғы режим жоқ")
+
+@dataclass
+class CurtainsOpen:
+    c: Curtains
+    def execute(self): self.c.open()
+    def undo(self): self.c.close()
+
+@dataclass
+class CurtainsClose:
+    c: Curtains
+    def execute(self): self.c.close()
+    def undo(self): self.c.open()
+
+@dataclass
+class MusicPlay:
+    m: MusicPlayer
+    def execute(self): self.m.play()
+    def undo(self): self.m.stop()
+
+@dataclass
+class MusicStop:
+    m: MusicPlayer
+    def execute(self): self.m.stop()
+    def undo(self): self.m.play()
+
+@dataclass
+class MacroCommand:
+    cmds: List[ICommand]
+    def execute(self): 
+        for c in self.cmds: c.execute()
+    def undo(self): 
+        for c in reversed(self.cmds): c.undo()
+
+@dataclass
+class RemoteControl:
+    slots: Dict[str, Tuple[ICommand, ICommand]] = field(default_factory=dict)
+    undo_stack: List[ICommand] = field(default_factory=list)
+    redo_stack: List[ICommand] = field(default_factory=list)
+    recording: bool = False
+    record_buffer: List[ICommand] = field(default_factory=list)
+
+    def set_slot(self, name: str, on_cmd: ICommand, off_cmd: ICommand):
+        self.slots[name] = (on_cmd, off_cmd)
+
+    def press_on(self, name: str):
+        on_cmd, _ = self.slots.get(name, (NoCommand(), NoCommand()))
+        on_cmd.execute()
+        self.undo_stack.append(on_cmd)
+        self.redo_stack.clear()
+        if self.recording: self.record_buffer.append(on_cmd)
+
+    def press_off(self, name: str):
+        _, off_cmd = self.slots.get(name, (NoCommand(), NoCommand()))
+        off_cmd.execute()
+        self.undo_stack.append(off_cmd)
+        self.redo_stack.clear()
+        if self.recording: self.record_buffer.append(off_cmd)
+
+    def undo(self):
+        if not self.undo_stack:
+            print("Болдырмау тарихы бос")
+            return
+        cmd = self.undo_stack.pop()
+        cmd.undo()
+        self.redo_stack.append(cmd)
+
+    def redo(self):
+        if not self.redo_stack:
+            print("Қайта орындау тарихы бос")
+            return
+        cmd = self.redo_stack.pop()
+        cmd.execute()
+        self.undo_stack.append(cmd)
+
+    def start_record(self):
+        self.recording = True
+        self.record_buffer = []
+        print("Жазу басталды")
+
+    def stop_record(self) -> MacroCommand:
+        self.recording = False
+        print(f"Жазу тоқтады, командалар саны: {len(self.record_buffer)}")
+        return MacroCommand(self.record_buffer.copy())
+
+class ReportGenerator(ABC):
+    def __init__(self): self.log: List[str] = []
+    def generate(self):
+        try:
+            self.start()
+            self.fetch_data()
+            self.format_data()
+            self.build_header()
+            self.build_body()
+            self.build_footer()
+            if self.customer_wants_save(): self.save_report()
+            else: self.send_email()
+            self.finish()
+        except Exception as e:
+            print(f"Есеп қатесі: {e}")
+    def log_step(self, t: str): self.log.append(t); print(t)
+    def start(self): self.log_step("Есепті бастау")
+    def finish(self): self.log_step("Есеп аяқталды")
+    @abstractmethod
+    def fetch_data(self): ...
+    @abstractmethod
+    def format_data(self): ...
+    @abstractmethod
+    def build_header(self): ...
+    @abstractmethod
+    def build_body(self): ...
+    @abstractmethod
+    def build_footer(self): ...
+    def customer_wants_save(self) -> bool: return True
+    def save_report(self): self.log_step("Есеп файлға сақталды")
+    def send_email(self): self.log_step("Есеп e-mail арқылы жіберілді")
+
+class PdfReport(ReportGenerator):
+    def fetch_data(self): self.log_step("PDF: деректер алу")
+    def format_data(self): self.log_step("PDF: деректер пішімдеу")
+    def build_header(self): self.log_step("PDF: тақырып")
+    def build_body(self): self.log_step("PDF: мазмұн")
+    def build_footer(self): self.log_step("PDF: төменгі колонтитул")
+    def save_report(self): self.log_step("PDF файл сақталды")
+
+class ExcelReport(ReportGenerator):
+    def __init__(self, path: str): super().__init__(); self.path = path
+    def fetch_data(self): self.log_step("Excel: деректер алу")
+    def format_data(self): self.log_step("Excel: деректер пішімдеу")
+    def build_header(self): self.log_step("Excel: тақырып")
+    def build_body(self): self.log_step("Excel: кесте")
+    def build_footer(self): self.log_step("Excel: қорытынды")
+    def save_report(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("Баған1,Баған2\n10,20\n")
+        self.log_step(f"Excel CSV сақталды: {self.path}")
+
+class HtmlReport(ReportGenerator):
+    def fetch_data(self): self.log_step("HTML: деректер алу")
+    def format_data(self): self.log_step("HTML: деректер пішімдеу")
+    def build_header(self): self.log_step("HTML: <header>")
+    def build_body(self): self.log_step("HTML: <section>")
+    def build_footer(self): self.log_step("HTML: <footer>")
+    def send_email(self): self.log_step("HTML сілтеме e-mail арқылы жіберілді")
+
+class CsvReport(ReportGenerator):
+    def __init__(self, path: str): super().__init__(); self.path = path
+    def fetch_data(self): self.log_step("CSV: деректер алу")
+    def format_data(self): self.log_step("CSV: пішімдеу")
+    def build_header(self): self.log_step("CSV: тақырып")
+    def build_body(self): self.log_step("CSV: жолдар")
+    def build_footer(self): self.log_step("CSV: аяқтау")
+    def save_report(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write("a,b,c\n1,2,3\n")
+        self.log_step(f"CSV сақталды: {self.path}")
+
+class IMediator(Protocol):
+    def register(self, u: "User"): ...
+    def unregister(self, u: "User"): ...
+    def send_all(self, s: "User", m: str): ...
+    def send_pm(self, s: "User", to: str, m: str): ...
+
+@dataclass
+class ChatMediator(IMediator):
+    users: Dict[str,"User"]=field(default_factory=dict)
+    def register(self, u: "User"):
+        self.users[u.name]=u;u.mediator=self
+        for x in self.users.values(): x.receive(f"{u.name} чатқа қосылды")
+    def unregister(self, u: "User"):
+        if u.name in self.users:
+            del self.users[u.name]; u.mediator=None
+            for x in self.users.values(): x.receive(f"{u.name} чаттан шықты")
+    def send_all(self, s: "User", m: str):
+        if s.name not in self.users: raise RuntimeError("Қатысушы тіркелмеген")
+        for n,x in self.users.items():
+            if n!=s.name: x.receive(f"{s.name}: {m}")
+    def send_pm(self, s: "User", to: str, m: str):
+        if s.name not in self.users: raise RuntimeError("Қатысушы тіркелмеген")
+        if to not in self.users: raise RuntimeError("Алушы табылмады")
+        self.users[to].receive(f"(жеке) {s.name}: {m}")
+
+@dataclass
+class ChannelMediator(ChatMediator):
+    channels: Dict[str, List[str]] = field(default_factory=dict)
+    blocked: Dict[str, bool] = field(default_factory=dict)
+    auto_create: bool = True
+    def join(self, user: "User", ch: str):
+        if ch not in self.channels:
+            if self.auto_create: self.channels[ch]=[]
+            else: raise RuntimeError("Арна жоқ")
+        if user.name not in self.channels[ch]: self.channels[ch].append(user.name)
+        for n in self.channels[ch]:
+            if n in self.users and n!=user.name: self.users[n].receive(f"{user.name} {ch} арнасына қосылды")
+    def leave(self, user: "User", ch: str):
+        if ch in self.channels and user.name in self.channels[ch]:
+            self.channels[ch].remove(user.name)
+            for n in self.channels[ch]:
+                if n in self.users: self.users[n].receive(f"{user.name} {ch} арнасынан шықты")
+    def send_channel(self, s: "User", ch: str, m: str):
+        if ch not in self.channels:
+            if self.auto_create: self.channels[ch]=[]
+            else: raise RuntimeError("Арна жоқ")
+        if s.name not in self.channels[ch]: raise RuntimeError("Қолданушы бұл арнада емес")
+        if self.blocked.get(s.name, False): raise RuntimeError("Пайдаланушы уақытша бұғатталған")
+        for n in self.channels[ch]:
+            if n in self.users and n!=s.name: self.users[n].receive(f"[{ch}] {s.name}: {m}")
+    def xsend(self, s: "User", from_ch: str, to_ch: str, m: str):
+        if from_ch not in self.channels or s.name not in self.channels[from_ch]:
+            raise RuntimeError("Бастапқы арнаға кірмеген")
+        if to_ch not in self.channels:
+            if self.auto_create: self.channels[to_ch]=[]
+            else: raise RuntimeError("Мақсатты арна жоқ")
+        for n in self.channels[to_ch]:
+            if n in self.users and n!=s.name: self.users[n].receive(f"[{from_ch} ➜ {to_ch}] {s.name}: {m}")
+    def admin_block(self, name: str):
+        self.blocked[name]=True; print(f"{name} уақытша бұғатталды")
+    def admin_unblock(self, name: str):
+        self.blocked[name]=False; print(f"{name} бұғаттан босатылды")
+
+@dataclass
+class User:
+    name: str
+    mediator: Optional[ChatMediator]=None
+    def send_all(self, m: str):
+        if self.mediator: self.mediator.send_all(self,m)
+    def send_pm(self, to: str, m: str):
+        if self.mediator: self.mediator.send_pm(self,to,m)
+    def receive(self, t: str):
+        print(f"[{self.name}] {t}")
+
+def demo_command():
+    print("\n--- Команда: пульт ---")
+    light=Light("Зал жарығы")
+    tv=Television("Қонақ бөлме TV")
+    ac=AirConditioner("Ұйықтайтын бөлме")
+    cur=Curtains("Терезе")
+    music=MusicPlayer("Плеер")
+
+    rc=RemoteControl()
+    rc.set_slot("light", LightOn(light), LightOff(light))
+    rc.set_slot("tv", TVOn(tv), TVOff(tv))
+    rc.set_slot("ac", ACOn(ac), ACOff(ac))
+    rc.set_slot("curt", CurtainsOpen(cur), CurtainsClose(cur))
+    rc.set_slot("mus", MusicPlay(music), MusicStop(music))
+
+    rc.press_on("light"); rc.press_off("light"); rc.undo(); rc.redo()
+    rc.press_on("tv"); rc.press_off("tv"); rc.undo()
+    rc.press_on("ac"); rc.press_on("curt"); rc.press_on("mus")
+
+    rc.start_record()
+    rc.press_off("curt"); rc.press_on("light"); rc.press_off("mus")
+    macro=rc.stop_record()
+
+    rc.undo(); rc.undo(); rc.undo()
+    macro.execute(); macro.undo()
+
+    rc.press_on("none")
+
+def demo_template():
+    print("\n--- Шаблонды әдіс: есептер ---")
+    pdf=PdfReport(); pdf.generate()
+    excel_path="report.csv"
+    excel=ExcelReport(excel_path); excel.generate()
+    html=HtmlReport(); html.generate()
+    csv=CsvReport("data.csv"); csv.generate()
+
+def demo_mediator():
+    print("\n--- Посредник: арналы чат ---")
+    chat=ChannelMediator()
+    a=User("Айгерім"); b=User("Бекзат"); d=User("Дана"); e=User("Ермек")
+    chat.register(a); chat.register(b); chat.register(d); chat.register(e)
+    chat.join(a,"general"); chat.join(b,"general")
+    chat.join(d,"ml"); chat.join(a,"ml")
+    chat.send_channel(a,"general","Сәлем!")
+    chat.send_channel(d,"ml","ML арнасы")
+    chat.xsend(a,"ml","general","ML-ден жалпы арнаға хабар")
+    chat.admin_block("Бекзат")
+    try: chat.send_channel(b,"general","мен бұғатталдым ба?")
+    except Exception as ex: print(f"Қате: {ex}")
+    chat.admin_unblock("Бекзат")
+    chat.send_channel(b,"general","бәрі ок")
+    chat.leave(b,"general")
+    chat.unregister(e)
+    try: b.send_all("тест")
+    except Exception as ex: print(f"Қате: {ex}")
+
+def main():
+    demo_command(); demo_template(); demo_mediator()
+
+if __name__=="__main__":
+    main()
 
