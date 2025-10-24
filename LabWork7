@@ -1,1 +1,168 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Protocol, Optional, List, Dict
+from abc import ABC, abstractmethod
+
+class ICommand(Protocol):
+    def execute(self): ...
+    def undo(self): ...
+
+@dataclass
+class Light:
+    name: str
+    is_on: bool = False
+    def on(self): self.is_on = True; print(f"{self.name} шамы қосылды")
+    def off(self): self.is_on = False; print(f"{self.name} шамы сөндірілді")
+
+@dataclass
+class Television:
+    name: str
+    is_on: bool = False
+    def on(self): self.is_on = True; print(f"{self.name} теледидары қосылды")
+    def off(self): self.is_on = False; print(f"{self.name} теледидары сөндірілді")
+
+@dataclass
+class AirConditioner:
+    name: str
+    is_on: bool = False
+    mode: str = "қалыпты"
+    def on(self): self.is_on = True; print(f"{self.name} кондиционері қосылды ({self.mode})")
+    def off(self): self.is_on = False; print(f"{self.name} кондиционері сөндірілді")
+    def set_mode(self, mode: str): self.mode = mode; print(f"{self.name} режимі {self.mode}")
+
+@dataclass
+class NoCommand:
+    def execute(self): print("Батырма орнатылмаған")
+    def undo(self): print("Болдырмау мүмкін емес")
+
+@dataclass
+class LightOn: light: Light
+def execute(self): self.light.on()
+def undo(self): self.light.off()
+
+@dataclass
+class LightOff: light: Light
+def execute(self): self.light.off()
+def undo(self): self.light.on()
+
+@dataclass
+class TVOn: tv: Television
+def execute(self): self.tv.on()
+def undo(self): self.tv.off()
+
+@dataclass
+class TVOff: tv: Television
+def execute(self): self.tv.off()
+def undo(self): self.tv.on()
+
+@dataclass
+class ACOn: ac: AirConditioner
+def execute(self): self.ac.on()
+def undo(self): self.ac.off()
+
+@dataclass
+class ACOff: ac: AirConditioner
+def execute(self): self.ac.off()
+def undo(self): self.ac.on()
+
+@dataclass
+class ACMode:
+    ac: AirConditioner; mode: str; prev: Optional[str] = None
+    def execute(self): self.prev = self.ac.mode; self.ac.set_mode(self.mode)
+    def undo(self): self.ac.set_mode(self.prev)
+
+@dataclass
+class Macro:
+    cmds: List[ICommand]
+    def execute(self): [c.execute() for c in self.cmds]
+    def undo(self): [c.undo() for c in reversed(self.cmds)]
+
+@dataclass
+class Remote:
+    on_cmd: ICommand = field(default_factory=NoCommand)
+    off_cmd: ICommand = field(default_factory=NoCommand)
+    last: Optional[ICommand] = None
+    def set(self, on, off): self.on_cmd, self.off_cmd = on, off
+    def on(self): self.on_cmd.execute(); self.last = self.on_cmd
+    def off(self): self.off_cmd.execute(); self.last = self.off_cmd
+    def undo(self): self.last.undo() if self.last else print("Болдырмау мүмкін емес")
+
+class Beverage(ABC):
+    def prepare(self):
+        self.boil(); self.brew(); self.pour()
+        if self.want(): self.add()
+    def boil(self): print("Су қайнату")
+    def pour(self): print("Кесе құю")
+    @abstractmethod
+    def brew(self): ...
+    @abstractmethod
+    def add(self): ...
+    def want(self): return True
+
+class Tea(Beverage):
+    def brew(self): print("Шайды демдеу")
+    def add(self): print("Лимон қосу")
+
+class Coffee(Beverage):
+    def __init__(self, want=True): self.want_cond = want
+    def brew(self): print("Кофені сүзу")
+    def add(self): print("Қант пен сүт қосу") if self.want_cond else print("Қосымшасыз кофе")
+    def want(self): return self.want_cond
+
+class HotChocolate(Beverage):
+    def __init__(self, marsh=True): self.marsh = marsh
+    def brew(self): print("Какао дайындау")
+    def add(self): print("Маршмеллоу қосу") if self.marsh else print("Маршмеллоусыз")
+
+class Mediator(Protocol):
+    def reg(self,u): ...
+    def send(self,s,m): ...
+    def pm(self,s,to,m): ...
+
+@dataclass
+class Chat:
+    users: Dict[str,'User']=field(default_factory=dict)
+    def reg(self,u:'User'): self.users[u.name]=u;u.chat=self;[x.recv(f"{u.name} кірді") for x in self.users.values()]
+    def send(self,s:'User',m:str): [u.recv(f"{s.name}: {m}") for n,u in self.users.items() if n!=s.name]
+    def pm(self,s:'User',to:str,m:str):
+        if to in self.users:self.users[to].recv(f"(жеке){s.name}: {m}")
+        else:print("Қолданушы табылмады")
+
+@dataclass
+class User:
+    name:str; chat:Optional[Chat]=None
+    def send(self,m:str): self.chat.send(self,m) if self.chat else None
+    def pm(self,to:str,m:str): self.chat.pm(self,to,m) if self.chat else None
+    def recv(self,m:str): print(f"[{self.name}] {m}")
+
+def demo_cmd():
+    print("\n--- Үй басқару ---")
+    l=Light("Жарық");t=Television("TV");a=AirConditioner("Кондиционер")
+    r=Remote()
+    r.set(LightOn(l),LightOff(l));r.on();r.off();r.undo()
+    r.set(TVOn(t),TVOff(t));r.on();r.off()
+    eco=Macro([ACOn(a),ACMode(a,"эко")])
+    r.set(eco,ACOff(a));r.on();r.undo();r.off()
+
+def demo_temp():
+    print("\n--- Сусындар ---")
+    Tea().prepare()
+    Coffee(False).prepare()
+    Coffee(True).prepare()
+    HotChocolate(True).prepare()
+    HotChocolate(False).prepare()
+
+def demo_chat():
+    print("\n--- Чат жүйесі ---")
+    c=Chat();a=User("Айгерім");b=User("Бекзат");d=User("Дана")
+    c.reg(a);c.reg(b);c.reg(d)
+    a.send("Сәлем бәріне!")
+    b.pm("Айгерім","Сәлем!")
+    d.send("Қуаныштымын танысқаныма")
+
+def main():
+    demo_cmd();demo_temp();demo_chat()
+
+if __name__=="__main__":
+    main()
 
