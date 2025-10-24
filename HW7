@@ -1,0 +1,243 @@
+from __future__ import annotations
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+from typing import List, Optional, Callable, Protocol
+
+
+class Command(Protocol):
+    def execute(self) -> None: ...
+    def undo(self) -> None: ...
+
+
+@dataclass
+class Light:
+    name: str
+    is_on: bool = False
+    def on(self): self.is_on = True; print(f"{self.name} шамы қосылды")
+    def off(self): self.is_on = False; print(f"{self.name} шамы сөндірілді")
+
+
+@dataclass
+class Door:
+    name: str
+    is_open: bool = False
+    def open(self): self.is_open = True; print(f"{self.name} есігі ашылды")
+    def close(self): self.is_open = False; print(f"{self.name} есігі жабылды")
+
+
+@dataclass
+class Thermostat:
+    name: str
+    temp: int = 22
+    def set(self, t: int): self.temp = t; print(f"{self.name} температурасы {self.temp}°C")
+    def up(self, d: int = 1): self.set(self.temp + d)
+    def down(self, d: int = 1): self.set(self.temp - d)
+
+
+@dataclass
+class LightOn:
+    light: Light
+    prev: Optional[bool] = None
+    def execute(self): self.prev = self.light.is_on; self.light.on()
+    def undo(self): self.light.on() if self.prev else self.light.off()
+
+
+@dataclass
+class LightOff:
+    light: Light
+    prev: Optional[bool] = None
+    def execute(self): self.prev = self.light.is_on; self.light.off()
+    def undo(self): self.light.on() if self.prev else self.light.off()
+
+
+@dataclass
+class DoorOpen:
+    door: Door
+    prev: Optional[bool] = None
+    def execute(self): self.prev = self.door.is_open; self.door.open()
+    def undo(self): self.door.open() if self.prev else self.door.close()
+
+
+@dataclass
+class DoorClose:
+    door: Door
+    prev: Optional[bool] = None
+    def execute(self): self.prev = self.door.is_open; self.door.close()
+    def undo(self): self.door.open() if self.prev else self.door.close()
+
+
+@dataclass
+class TempUp:
+    t: Thermostat
+    d: int = 1
+    prev: Optional[int] = None
+    def execute(self): self.prev = self.t.temp; self.t.up(self.d)
+    def undo(self): self.t.set(self.prev)
+
+
+@dataclass
+class TempDown:
+    t: Thermostat
+    d: int = 1
+    prev: Optional[int] = None
+    def execute(self): self.prev = self.t.temp; self.t.down(self.d)
+    def undo(self): self.t.set(self.prev)
+
+
+@dataclass
+class TV:
+    name: str
+    is_on: bool = False
+    def on(self): self.is_on = True; print(f"{self.name} теледидары қосылды")
+    def off(self): self.is_on = False; print(f"{self.name} теледидары сөндірілді")
+
+
+@dataclass
+class TVOn:
+    tv: TV
+    prev: Optional[bool] = None
+    def execute(self): self.prev = self.tv.is_on; self.tv.on()
+    def undo(self): self.tv.on() if self.prev else self.tv.off()
+
+
+@dataclass
+class TVOff:
+    tv: TV
+    prev: Optional[bool] = None
+    def execute(self): self.prev = self.tv.is_on; self.tv.off()
+    def undo(self): self.tv.on() if self.prev else self.tv.off()
+
+
+class Remote:
+    def __init__(self): self.h: List[Command] = []
+    def press(self, c: Command): c.execute(); self.h.append(c)
+    def undo(self, n: int = 1):
+        for _ in range(n):
+            if not self.h:
+                print("Басқа бұйрық жоқ")
+                break
+            self.h.pop().undo()
+
+
+class Beverage(ABC):
+    def prepare(self):
+        self.boil()
+        self.brew()
+        self.pour()
+        if self.want_condiments(): self.add()
+    def boil(self): print("Су қайнату")
+    def pour(self): print("Кесе құю")
+    @abstractmethod
+    def brew(self): ...
+    @abstractmethod
+    def add(self): ...
+    def want_condiments(self): return True
+
+
+class Tea(Beverage):
+    def brew(self): print("Шайды демдеу")
+    def add(self): print("Лимон қосу")
+
+
+class Coffee(Beverage):
+    def __init__(self, want: bool = True): self.want = want
+    def brew(self): print("Кофені сүзу")
+    def add(self): print("Қант пен сүт қосу")
+    def want_condiments(self): return self.want
+
+
+class HotChocolate(Beverage):
+    def __init__(self, marsh: bool = True): self.marsh = marsh
+    def brew(self): print("Какао ұнтағын араластыру")
+    def add(self):
+        if self.marsh: print("Маршмеллоу қосу")
+        else: print("Маршмеллоусыз")
+
+
+class Mediator(Protocol):
+    def register(self, u: "User"): ...
+    def send(self, s: "User", m: str): ...
+    def send_to(self, s: "User", r: str, m: str): ...
+
+
+class ChatRoom:
+    def __init__(self): self.users = {}
+    def register(self, u: "User"):
+        self.users[u.name] = u; u.chat = self
+        for usr in self.users.values():
+            usr.receive(f"{u.name} чатқа кірді")
+    def send(self, s: "User", m: str):
+        for n, u in self.users.items():
+            if n != s.name: u.receive(f"{s.name}: {m}")
+    def send_to(self, s: "User", r: str, m: str):
+        if r in self.users:
+            self.users[r].receive(f"(жеке) {s.name}: {m}")
+        else:
+            print("Қолданушы табылмады")
+    def remove(self, u: "User"):
+        if u.name in self.users:
+            del self.users[u.name]
+            for usr in self.users.values():
+                usr.receive(f"{u.name} чатты тастады")
+
+
+@dataclass
+class User:
+    name: str
+    chat: Optional[Mediator] = None
+    def send(self, m: str):
+        if self.chat: self.chat.send(self, m)
+    def send_to(self, r: str, m: str):
+        if self.chat: self.chat.send_to(self, r, m)
+    def receive(self, m: str):
+        print(f"[{self.name}] {m}")
+
+
+def demo_command():
+    print("\n--- Smart Home ---")
+    l = Light("Қонақ бөлме")
+    d = Door("Дәліз")
+    t = Thermostat("Бөлме", 21)
+    tv = TV("Қонақ бөлме")
+    r = Remote()
+    r.press(LightOn(l))
+    r.press(DoorOpen(d))
+    r.press(TempUp(t, 3))
+    r.press(TVOn(tv))
+    r.press(LightOff(l))
+    r.press(DoorClose(d))
+    r.press(TempDown(t, 2))
+    print("Undo соңғы 3 команда:")
+    r.undo(3)
+    print("Undo тағы 10:")
+    r.undo(10)
+
+
+def demo_template():
+    print("\n--- Сусындар ---")
+    Tea().prepare()
+    Coffee(want=False).prepare()
+    HotChocolate(True).prepare()
+    HotChocolate(False).prepare()
+
+
+def demo_mediator():
+    print("\n--- Чат жүйесі ---")
+    room = ChatRoom()
+    a = User("Айгерім"); b = User("Бекзат"); c = User("Дана")
+    room.register(a); room.register(b); room.register(c)
+    a.send("Сәлем бәріне!")
+    b.send_to("Айгерім", "Сәлем, жеке хабар!")
+    c.send("Қуаныштымын танысқаныма")
+    room.remove(b)
+    b.send("Бұл хабар жіберілмейді")
+
+
+def main():
+    demo_command()
+    demo_template()
+    demo_mediator()
+
+
+if __name__ == "__main__":
+    main()
